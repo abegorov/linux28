@@ -1,0 +1,90 @@
+---
+- name: Configure routers
+  hosts:
+    - inetRouter
+    - centralRouter
+    - office2Router
+    - office1Router
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Enable ip forwarding
+      ansible.posix.sysctl:
+        name: net.ipv4.ip_forward
+        value: '1'
+        state: present
+        reload: true
+
+
+- name: Configure inetRouter
+  hosts: inetRouter
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Enable masquerade
+      ansible.builtin.copy:
+        content: |
+          table ip nat {
+            chain prerouting {
+              type nat hook prerouting priority dstnat; policy accept;
+            }
+            chain postrouting {
+              type nat hook postrouting priority srcnat; policy accept;
+              oifname "eth0" masquerade
+            }
+          }
+        dest: /etc/sysconfig/nftables.conf
+        owner: root
+        group: root
+        mode: '0600'
+      notify: Reload nftables service
+
+    - name: Enable and start nftables service
+      ansible.builtin.systemd_service:
+        name: nftables.service
+        enabled: true
+        state: started
+
+  handlers:
+    - name: Reload nftables service
+      ansible.builtin.systemd_service:
+        name: nftables.service
+        state: reloaded
+
+
+- name: Common provision
+  hosts: all
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Configure network  # noqa: args[module]
+      community.general.nmcli:
+        conn_name: '{{ item.conn_name }}'
+        ifname: '{{ item.ifname }}'
+        ip4: '{{ item.ip4 | default(omit) }}'
+        gw4: '{{ item.gw4 | default(omit) }}'
+        routes4: '{{ item.routes4 | default(omit) }}'
+        gw4_ignore_auto: '{{ item.gw4_ignore_auto | default(omit) }}'
+        type: ethernet
+        state: present
+      loop: '{{ nmcli_connections }}'
+      loop_control:
+        label: '{{ item.conn_name }}'
+      register: configure_network_results
+      notify:
+        - Reload network manager configuration
+        - Reapply network configuration
+
+  handlers:
+    - name: Reload network manager configuration
+      ansible.builtin.command: /usr/bin/nmcli connection reload
+      changed_when: true
+
+    - name: Reapply network configuration
+      ansible.builtin.command: /usr/bin/nmcli device reapply {{
+        item.invocation.module_args.ifname }}
+      when: item.changed
+      changed_when: true
+      loop: '{{ configure_network_results.results }}'
+      loop_control:
+        label: '{{ item.invocation.module_args.conn_name }}'
