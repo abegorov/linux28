@@ -72,7 +72,7 @@
 
 ## Практическая часть
 
-![IP адресация](images/network.png)
+![IP адресация](images/ip.png)
 
 Задание сделано на **rockylinux/9** версии **v4.0.0**. Для автоматизации процесса написан **Ansible Playbook** [playbook.yml](playbook.yml) который:
 
